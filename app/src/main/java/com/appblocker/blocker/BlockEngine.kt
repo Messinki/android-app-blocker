@@ -2,23 +2,29 @@ package com.appblocker.blocker
 
 import com.appblocker.data.Block
 
+/**
+ * One app's unlock under one block. Sessions are tracked per app, so unlocking
+ * Instagram does not unlock the other apps in the same block.
+ */
+data class AppUnlock(val blockId: String, val packageName: String)
+
 /** What the accessibility service should do, given what is on screen right now. */
 sealed interface Decision {
 
-    /** Nothing locked is on screen (or everything visible is inside an unlock session). */
+    /** Nothing locked is on screen (or every visible blocked app is inside an unlock session). */
     data object None : Decision
 
     /**
      * A locked app is on screen: show (or keep showing) the hold screen.
-     * The button must be held for [holdMillis]; completing it unlocks every block in [blockIds].
+     * The button must be held for [holdMillis]; completing it starts every session in [unlocks].
      */
-    data class ShowHold(val holdMillis: Long, val blockIds: Set<String>) : Decision
+    data class ShowHold(val holdMillis: Long, val unlocks: Set<AppUnlock>) : Decision
 
     /**
-     * The unlock session of [blockIds] ran out while the user was using one of its apps.
+     * The sessions in [unlocks] ran out while the user was using that app.
      * Send them to the home screen (rather than dropping the hold screen on them mid-use).
      */
-    data class GoHome(val blockIds: Set<String>) : Decision
+    data class GoHome(val unlocks: Set<AppUnlock>) : Decision
 }
 
 /**
@@ -28,37 +34,41 @@ sealed interface Decision {
  * phone sleeps), passed in by the caller so tests can control them.
  *
  * Rules:
- * - A visible app that belongs to an enabled block with no running session is locked.
- * - If an app is in several blocks, it is locked if ANY of them is locked.
- *   The hold screen uses the longest hold time and unlocks all of them.
+ * - A block only sets the rule (hold time, session length) for its apps. Every app is
+ *   unlocked on its own: holding to open Instagram leaves the block's other apps locked.
+ * - A visible app that belongs to an enabled block, with no running session for that
+ *   app under that block, is locked.
+ * - If an app is in several blocks, it is locked if ANY of them is locked for it.
+ *   The hold screen uses the longest hold time and unlocks the app under all of them.
+ * - Several locked apps on screen at once (split screen): one hold unlocks all of them.
  * - A session is a fixed window starting at unlock: leaving and coming back inside
  *   it needs no new hold. Editing a block mid-session does not change its end time;
  *   new hold/session lengths apply from the next hold.
  * - When a session ends while its app is in use, the answer is [Decision.GoHome].
  *   When it ended while the user was elsewhere, coming back shows the hold screen.
- * - Disabled blocks and blocks no longer in the list never block. A deleted block's
- *   session is forgotten.
+ * - Disabled blocks and blocks no longer in the list never block. Sessions of deleted
+ *   blocks, and of apps removed from a block, are forgotten.
  * - A session length of 0 means "no time limit": the session has no end time and
- *   never sends the user home. It ends when the block's apps have been off screen
- *   for [LEAVE_GRACE_MS] (the grace covers fold/unfold relaunches and quick hops).
+ *   never sends the user home. It ends when the app has been off screen for
+ *   [LEAVE_GRACE_MS] (the grace covers fold/unfold relaunches and quick hops).
  */
 class BlockEngine {
 
-    /** blockId -> moment (elapsed realtime ms) its unlock session ends. */
-    private val unlockedUntil = HashMap<String, Long>()
+    /** app session -> moment (elapsed realtime ms) it ends. */
+    private val unlockedUntil = HashMap<AppUnlock, Long>()
 
     /**
-     * Blocks whose running session has no time limit. While their apps are on screen
-     * their end time is [OPEN_ENDED]; once the apps leave, it becomes "now + grace".
+     * Sessions with no time limit. While their app is on screen their end time is
+     * [OPEN_ENDED]; once the app leaves, it becomes "now + grace".
      */
-    private val openEnded = HashSet<String>()
+    private val openEnded = HashSet<AppUnlock>()
 
     /**
-     * Blocks whose apps were on screen AND usable (unlocked, no hold screen) at the
+     * Sessions whose app was on screen AND usable (unlocked, no hold screen) at the
      * last [evaluate]. This tells "the session ran out while you were using the app"
      * (go home) apart from "you came back after it ran out" (hold screen).
      */
-    private var inUseBlockIds: Set<String> = emptySet()
+    private var inUse: Set<AppUnlock> = emptySet()
 
     /**
      * Decide what to do. Call this whenever the visible apps or the block list change,
@@ -68,61 +78,72 @@ class BlockEngine {
      *   pop-up windows...), excluding our own app.
      */
     fun evaluate(blocks: List<Block>, visiblePackages: Set<String>, nowMs: Long): Decision {
-        // Forget sessions of blocks that were deleted.
-        val existingIds = blocks.mapTo(HashSet()) { it.id }
-        unlockedUntil.keys.retainAll(existingIds)
+        // Forget sessions of deleted blocks and of apps taken out of their block.
+        val blocksById = blocks.associateBy { it.id }
+        unlockedUntil.keys.retainAll { blocksById[it.blockId]?.packages?.contains(it.packageName) == true }
+        openEnded.retainAll(unlockedUntil.keys)
 
-        val unlocked = HashSet<String>()
-        val expiredWhileInUse = HashSet<String>()
-        val locked = ArrayList<Block>()
+        // No-time-limit sessions: no end while the app is on screen, grace once it leaves.
+        for (key in openEnded) {
+            val visible = blocksById.getValue(key.blockId).enabled && key.packageName in visiblePackages
+            val current = unlockedUntil.getValue(key)
+            unlockedUntil[key] = if (visible) OPEN_ENDED else minOf(current, nowMs + LEAVE_GRACE_MS)
+        }
+
+        val unlocked = HashSet<AppUnlock>()
+        val expiredWhileInUse = HashSet<AppUnlock>()
+        val locked = HashSet<AppUnlock>()
+        var holdMillis = 0L
 
         for (block in blocks) {
-            val visible = block.enabled && block.packages.any { it in visiblePackages }
-            if (block.id in openEnded) {
-                val current = unlockedUntil.getValue(block.id)
-                unlockedUntil[block.id] =
-                    if (visible) OPEN_ENDED else minOf(current, nowMs + LEAVE_GRACE_MS)
-            }
-            if (!visible) continue
-
-            val until = unlockedUntil[block.id]
-            when {
-                until != null && nowMs < until -> unlocked += block.id
-                until != null && block.id in inUseBlockIds -> expiredWhileInUse += block.id
-                else -> locked += block
+            if (!block.enabled) continue
+            for (pkg in block.packages) {
+                if (pkg !in visiblePackages) continue
+                val key = AppUnlock(block.id, pkg)
+                val until = unlockedUntil[key]
+                when {
+                    until != null && nowMs < until -> unlocked += key
+                    until != null && key in inUse -> expiredWhileInUse += key
+                    else -> {
+                        locked += key
+                        holdMillis = maxOf(holdMillis, holdMillisFor(block))
+                    }
+                }
             }
         }
 
-        // Once a session is over it's over, whether or not its apps are visible.
+        // Once a session is over it's over, whether or not its app is visible.
         unlockedUntil.entries.removeAll { it.value <= nowMs }
         openEnded.retainAll(unlockedUntil.keys)
 
         if (expiredWhileInUse.isNotEmpty()) {
-            inUseBlockIds = emptySet()
+            inUse = emptySet()
             return Decision.GoHome(expiredWhileInUse)
         }
         if (locked.isNotEmpty()) {
             // The hold screen covers the whole display, so nothing is "in use" under it.
-            inUseBlockIds = emptySet()
-            return Decision.ShowHold(
-                holdMillis = locked.maxOf { holdMillisFor(it) },
-                blockIds = locked.mapTo(HashSet()) { it.id },
-            )
+            inUse = emptySet()
+            return Decision.ShowHold(holdMillis, locked)
         }
-        inUseBlockIds = unlocked
+        inUse = unlocked
         return Decision.None
     }
 
-    /** The hold for [blockIds] was completed: start a session for each (enabled, existing) block. */
-    fun onHoldCompleted(blockIds: Set<String>, blocks: List<Block>, nowMs: Long) {
-        for (block in blocks) {
-            if (block.id !in blockIds || !block.enabled) continue
+    /**
+     * The hold for [unlocks] was completed: start each session, if its block still
+     * exists, is enabled and still contains that app.
+     */
+    fun onHoldCompleted(unlocks: Set<AppUnlock>, blocks: List<Block>, nowMs: Long) {
+        val blocksById = blocks.associateBy { it.id }
+        for (key in unlocks) {
+            val block = blocksById[key.blockId] ?: continue
+            if (!block.enabled || key.packageName !in block.packages) continue
             if (hasNoTimeLimit(block)) {
-                unlockedUntil[block.id] = OPEN_ENDED
-                openEnded += block.id
+                unlockedUntil[key] = OPEN_ENDED
+                openEnded += key
             } else {
-                unlockedUntil[block.id] = nowMs + sessionMillisFor(block)
-                openEnded -= block.id
+                unlockedUntil[key] = nowMs + sessionMillisFor(block)
+                openEnded -= key
             }
         }
     }
@@ -130,15 +151,15 @@ class BlockEngine {
     /**
      * When the next session ends (elapsed realtime ms), or null if none is running.
      * The service re-evaluates at that moment so it can send the user home on time.
-     * Sessions with no time limit only count once their apps have left the screen.
+     * Sessions with no time limit only count once their app has left the screen.
      */
     fun nextExpiryMs(): Long? = unlockedUntil.values.filter { it != OPEN_ENDED }.minOrNull()
 
     companion object {
-        /** End time of a no-time-limit session while its apps are on screen. */
+        /** End time of a no-time-limit session while its app is on screen. */
         private const val OPEN_ENDED = Long.MAX_VALUE
 
-        /** How long a no-time-limit session survives with its apps off screen. */
+        /** How long a no-time-limit session survives with its app off screen. */
         const val LEAVE_GRACE_MS = 3_000L
 
         /** Session length 0 = no time limit (negative values are treated as bad input). */

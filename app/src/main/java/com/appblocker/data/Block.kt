@@ -7,9 +7,10 @@ import java.util.UUID
  * One "block": a group of apps that share the same hold-to-open rule.
  *
  * Opening any app in [packages] shows the black hold screen. Holding the button
- * for [holdSeconds] without letting go unlocks every app in the block for
- * [sessionMinutes]; when that runs out the user is sent to the home screen.
- * [sessionMinutes] = 0 means no time limit: the apps stay open until you leave them.
+ * for [holdSeconds] without letting go unlocks THAT app (not the rest of the block)
+ * for [sessionMinutes]; when that runs out the user is sent to the home screen.
+ * [sessionMinutes] = 0 means no time limit: the app stays open until you leave it.
+ * The block only defines the rule; each app's unlock is tracked separately.
  */
 @Serializable
 data class Block(
