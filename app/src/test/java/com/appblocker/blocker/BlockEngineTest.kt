@@ -157,6 +157,18 @@ class BlockEngineTest {
         assertEquals(hold(120_000, INSTA, TWITTER), eval(blocks, INSTA, TWITTER, at = 2 * MIN))
     }
 
+    @Test
+    fun screenOff_endsSession_soReturningShowsHoldNotGoHome() {
+        val blocks = listOf(social.copy(sessionMinutes = 0))
+        unlock(blocks, 0, INSTA)
+        assertEquals(Decision.None, eval(blocks, INSTA, at = 0))
+
+        engine.endSession()
+        assertNull(engine.nextExpiryMs())
+        // Still on screen after unlocking the phone a moment later.
+        assertEquals(hold(120_000, INSTA), eval(blocks, INSTA, at = 1_000))
+    }
+
     // ---------------------------------------------------------------- session length
 
     @Test

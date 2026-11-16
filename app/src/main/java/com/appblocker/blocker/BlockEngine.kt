@@ -35,7 +35,8 @@ sealed interface Decision {
  *   two in split screen.
  * - An app drops out of the session once it has been off screen for [LEAVE_GRACE_MS]
  *   (the grace covers fold/unfold relaunches and quick hops). Coming back later needs
- *   a new hold. The session is over once it has no apps left.
+ *   a new hold. The session is over once it has no apps left, or when the screen
+ *   turns off ([endSession]).
  * - Session length is the most time the session may last. When it runs out while an
  *   unlocked app is in use, the answer is [Decision.GoHome]. It is fixed at unlock:
  *   editing a block later applies from the next hold.
@@ -121,6 +122,12 @@ class BlockEngine {
             endsAtMs = sessionMillis?.let { nowMs + it },
             apps = apps.associateWithTo(HashMap()) { null },
         )
+    }
+
+    /** The screen turned off: lock everything (the next open needs a new hold). */
+    fun endSession() {
+        session = null
+        wasInUse = false
     }
 
     /**

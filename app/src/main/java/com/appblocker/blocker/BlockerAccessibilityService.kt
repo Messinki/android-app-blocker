@@ -379,9 +379,14 @@ class BlockerAccessibilityService : AccessibilityService() {
         val receiver = object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
                 when (intent?.action) {
-                    // Screen off: the hold resets, and the overlay must not sit on top of
-                    // the lock screen. It comes back after unlocking if still needed.
-                    Intent.ACTION_SCREEN_OFF -> hideHoldScreen()
+                    // Screen off counts as leaving: the session ends, the hold resets,
+                    // and the overlay must not sit on top of the lock screen. After
+                    // unlocking the phone, a blocked app still on screen gets the hold.
+                    Intent.ACTION_SCREEN_OFF -> {
+                        engine.endSession()
+                        handler.removeCallbacks(sessionExpiryCheck)
+                        hideHoldScreen()
+                    }
                     Intent.ACTION_SCREEN_ON, Intent.ACTION_USER_PRESENT -> recheck()
                 }
             }
