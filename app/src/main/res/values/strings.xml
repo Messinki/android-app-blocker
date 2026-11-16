@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">App Blocker</string>
+    <string name="accessibility_service_description">Watches which app is in the foreground so App Blocker can show the hold screen over blocked apps. Nothing leaves your device.</string>
+</resources>

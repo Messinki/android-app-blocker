@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Config for BlockerAccessibilityService.
+
+    - Only window events: enough to know which apps are on screen, and far
+      quieter than content-change events.
+    - flagRetrieveInteractiveWindows + canRetrieveWindowContent let the service
+      read `windows` and each window's root node (to get its package name), so
+      split-screen and pop-up windows are all seen, not just the focused app.
+    - No packageNames attribute on purpose: we need events from every app.
+    - notificationTimeout throttles events to at most one per 100 ms per type.
+-->
+<accessibility-service xmlns:android="http://schemas.android.com/apk/res/android"
+    android:accessibilityEventTypes="typeWindowStateChanged|typeWindowsChanged"
+    android:accessibilityFeedbackType="feedbackGeneric"
+    android:accessibilityFlags="flagRetrieveInteractiveWindows"
+    android:canRetrieveWindowContent="true"
+    android:notificationTimeout="100"
+    android:description="@string/accessibility_service_description" />
