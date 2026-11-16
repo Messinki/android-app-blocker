@@ -138,8 +138,9 @@ fun BlockEditorScreen(onClose: () -> Unit, vm: EditorViewModel = viewModel()) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Session length", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Minutes the apps stay open before you are sent to the home screen. " +
-                        "0 = no time limit: they stay open until you leave them.",
+                    "Minutes an unlocked app stays open before you are sent to the home screen. " +
+                        "Leaving the app for more than 3 seconds locks it again either way. " +
+                        "0 = no time limit.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 NumberField(

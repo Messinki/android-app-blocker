@@ -61,8 +61,8 @@ class BlockerAccessibilityService : AccessibilityService() {
     /** Last known set of visible app packages (kept as-is through transient states). */
     private var visiblePackages: Set<String> = emptySet()
 
-    /** App sessions that completing the current hold will start. */
-    private var holdUnlocks: Set<AppUnlock> = emptySet()
+    /** Apps that completing the current hold will unlock. */
+    private var holdPackages: Set<String> = emptySet()
 
     /** After sending the user home, don't pop the hold screen up during the home animation. */
     private var noHoldScreenUntilUptime = 0L
@@ -155,7 +155,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         scope = null
         handler.removeCallbacksAndMessages(null)
         holdTimer.reset()
-        holdUnlocks = emptySet()
+        holdPackages = emptySet()
         overlay?.hide()
         overlay = null
         systemEventsReceiver?.let {
@@ -266,7 +266,7 @@ class BlockerAccessibilityService : AccessibilityService() {
         when (decision) {
             Decision.None -> hideHoldScreenSoon()
             is Decision.ShowHold -> showHoldScreen(decision)
-            is Decision.GoHome -> sendHome(decision.unlocks)
+            Decision.GoHome -> sendHome()
         }
         scheduleSessionExpiryCheck()
     }
@@ -276,9 +276,9 @@ class BlockerAccessibilityService : AccessibilityService() {
         handler.removeCallbacks(delayedHide)
 
         if (ov.isShowing) {
-            // Already up (never add it twice). Follow changes, e.g. another app session
-            // ran out underneath: unlock the new set, and keep the current press going.
-            holdUnlocks = decision.unlocks
+            // Already up (never add it twice). Follow changes, e.g. another blocked app
+            // opened in split screen: unlock the new set, and keep the current press going.
+            holdPackages = decision.packages
             if (holdTimer.requiredMillis != decision.holdMillis) {
                 holdTimer.requiredMillis = decision.holdMillis
                 scheduleHoldTimeReached()
@@ -299,7 +299,7 @@ class BlockerAccessibilityService : AccessibilityService() {
 
         holdTimer.reset()
         holdTimer.requiredMillis = decision.holdMillis
-        holdUnlocks = decision.unlocks
+        holdPackages = decision.packages
         ov.show() // if this fails, the next window event tries again
     }
 
@@ -317,13 +317,13 @@ class BlockerAccessibilityService : AccessibilityService() {
         handler.removeCallbacks(delayedHide)
         handler.removeCallbacks(holdTimeReached)
         holdTimer.reset()
-        holdUnlocks = emptySet()
+        holdPackages = emptySet()
         overlay?.hide()
     }
 
-    /** A session ended while its app was in use. */
-    private fun sendHome(unlocks: Set<AppUnlock>) {
-        Log.i(TAG, "Unlock session over for $unlocks; going home")
+    /** The session ended while an unlocked app was in use. */
+    private fun sendHome() {
+        Log.i(TAG, "Unlock session over; going home")
         hideHoldScreen()
         noHoldScreenUntilUptime = SystemClock.uptimeMillis() + AFTER_HOME_GRACE_MS
         performGlobalAction(AccessibilityService.GLOBAL_ACTION_HOME)
@@ -357,7 +357,7 @@ class BlockerAccessibilityService : AccessibilityService() {
             return
         }
         engine.onHoldCompleted(
-            holdUnlocks,
+            holdPackages,
             BlockRepository.blocks.value,
             SystemClock.elapsedRealtime(),
         )
