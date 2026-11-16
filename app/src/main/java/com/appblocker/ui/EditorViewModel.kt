@@ -76,7 +76,7 @@ class EditorViewModel(savedStateHandle: SavedStateHandle) : ViewModel() {
     companion object {
         const val MIN_HOLD_SECONDS = 1
         const val MAX_HOLD_SECONDS = 60 * 60
-        const val MIN_SESSION = 1
+        const val MIN_SESSION = 0
         const val MAX_SESSION = 600
     }
 }

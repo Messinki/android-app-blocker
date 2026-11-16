@@ -145,6 +145,60 @@ class BlockEngineTest {
         assertNull(engine.nextExpiryMs())
     }
 
+    // ---------------------------------------------------------------- no time limit (0 min)
+
+    @Test
+    fun zeroMinuteSession_neverSendsHome_whileAppStaysOpen() {
+        val blocks = listOf(social.copy(sessionMinutes = 0))
+        engine.onHoldCompleted(setOf("social"), blocks, 0)
+
+        assertEquals(Decision.None, eval(blocks, INSTA, at = 0))
+        assertNull(engine.nextExpiryMs())
+        assertEquals(Decision.None, eval(blocks, INSTA, at = 600 * MIN))
+        assertNull(engine.nextExpiryMs())
+    }
+
+    @Test
+    fun zeroMinuteSession_endsAfterLeavingTheApps() {
+        val blocks = listOf(social.copy(sessionMinutes = 0))
+        engine.onHoldCompleted(setOf("social"), blocks, 0)
+        assertEquals(Decision.None, eval(blocks, INSTA, at = 0))
+
+        // Left for the home screen: the session ends after the grace period.
+        assertEquals(Decision.None, eval(blocks, LAUNCHER, at = 5 * MIN))
+        assertEquals(5 * MIN + GRACE, engine.nextExpiryMs())
+        assertEquals(Decision.None, eval(blocks, LAUNCHER, at = 5 * MIN + GRACE))
+        assertNull(engine.nextExpiryMs())
+
+        assertEquals(
+            Decision.ShowHold(120_000, setOf("social")),
+            eval(blocks, INSTA, at = 6 * MIN),
+        )
+    }
+
+    @Test
+    fun zeroMinuteSession_survivesBriefTripAway() {
+        val blocks = listOf(social.copy(sessionMinutes = 0))
+        engine.onHoldCompleted(setOf("social"), blocks, 0)
+        assertEquals(Decision.None, eval(blocks, INSTA, at = 0))
+
+        // e.g. fold/unfold relaunch, or a quick look at another app.
+        assertEquals(Decision.None, eval(blocks, at = 1 * MIN))
+        assertEquals(Decision.None, eval(blocks, TWITTER, at = 1 * MIN + GRACE - 1))
+        assertNull(engine.nextExpiryMs()) // back on screen: no end time again
+        assertEquals(Decision.None, eval(blocks, TWITTER, at = 60 * MIN))
+    }
+
+    @Test
+    fun zeroMinuteSession_appSharedWithTimedBlock_timedBlockStillGoesHome() {
+        val blocks = listOf(social.copy(sessionMinutes = 0), evening)
+        engine.onHoldCompleted(setOf("social", "evening"), blocks, 0)
+        assertEquals(Decision.None, eval(blocks, INSTA, at = 0))
+
+        assertEquals(5 * MIN, engine.nextExpiryMs())
+        assertEquals(Decision.GoHome(setOf("evening")), eval(blocks, INSTA, at = 5 * MIN))
+    }
+
     // ---------------------------------------------------------------- overlapping blocks
 
     @Test
@@ -241,6 +295,7 @@ class BlockEngineTest {
 
     private companion object {
         const val MIN = 60_000L
+        const val GRACE = BlockEngine.LEAVE_GRACE_MS
         const val INSTA = "com.instagram.android"
         const val TWITTER = "com.twitter.android"
         const val YOUTUBE = "com.google.android.youtube"

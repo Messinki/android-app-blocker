@@ -138,13 +138,14 @@ fun BlockEditorScreen(onClose: () -> Unit, vm: EditorViewModel = viewModel()) {
             Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Text("Session length", style = MaterialTheme.typography.titleMedium)
                 Text(
-                    "Minutes the apps stay open before you are sent to the home screen.",
+                    "Minutes the apps stay open before you are sent to the home screen. " +
+                        "0 = no time limit: they stay open until you leave them.",
                     style = MaterialTheme.typography.bodySmall,
                 )
                 NumberField(
                     value = vm.sessionMinutes,
                     onChange = { vm.sessionMinutes = it },
-                    label = "Minutes (1 to 600)",
+                    label = "Minutes (0 to 600)",
                     isError = !vm.sessionValid,
                     modifier = Modifier.fillMaxWidth(),
                 )
@@ -275,8 +276,13 @@ private fun AppPickerDialog(vm: EditorViewModel, onDone: () -> Unit) {
                         LazyColumn(Modifier.fillMaxSize()) {
                             items(shown, key = { it.packageName }) { app ->
                                 val checked = app.packageName in vm.packages
+                                // Ticking an app clears the search, ready to look for the next one.
+                                val toggle = {
+                                    if (!checked) query = ""
+                                    vm.togglePackage(app.packageName)
+                                }
                                 ListItem(
-                                    modifier = Modifier.clickable { vm.togglePackage(app.packageName) },
+                                    modifier = Modifier.clickable(onClick = toggle),
                                     headlineContent = { Text(app.label) },
                                     leadingContent = {
                                         Image(app.icon, contentDescription = null, modifier = Modifier.size(40.dp))
@@ -284,7 +290,7 @@ private fun AppPickerDialog(vm: EditorViewModel, onDone: () -> Unit) {
                                     trailingContent = {
                                         Checkbox(
                                             checked = checked,
-                                            onCheckedChange = { vm.togglePackage(app.packageName) },
+                                            onCheckedChange = { toggle() },
                                         )
                                     },
                                 )

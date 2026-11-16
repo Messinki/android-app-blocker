@@ -127,7 +127,7 @@ private fun ServiceCard(onOpenSettings: () -> Unit) {
 private fun summaryLine(block: Block): String {
     val n = block.packages.size
     val apps = if (n == 1) "1 app" else "$n apps"
-    return "$apps · hold ${formatHold(block.holdSeconds)} · ${block.sessionMinutes} min session"
+    return "$apps · hold ${formatHold(block.holdSeconds)} · ${if (block.sessionMinutes == 0) "no time limit" else "${block.sessionMinutes} min session"}"
 }
 
 private fun formatHold(totalSeconds: Int): String {

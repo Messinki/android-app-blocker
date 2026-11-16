@@ -9,6 +9,7 @@ import java.util.UUID
  * Opening any app in [packages] shows the black hold screen. Holding the button
  * for [holdSeconds] without letting go unlocks every app in the block for
  * [sessionMinutes]; when that runs out the user is sent to the home screen.
+ * [sessionMinutes] = 0 means no time limit: the apps stay open until you leave them.
  */
 @Serializable
 data class Block(

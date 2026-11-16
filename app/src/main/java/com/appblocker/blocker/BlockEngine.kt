@@ -38,11 +38,20 @@ sealed interface Decision {
  *   When it ended while the user was elsewhere, coming back shows the hold screen.
  * - Disabled blocks and blocks no longer in the list never block. A deleted block's
  *   session is forgotten.
+ * - A session length of 0 means "no time limit": the session has no end time and
+ *   never sends the user home. It ends when the block's apps have been off screen
+ *   for [LEAVE_GRACE_MS] (the grace covers fold/unfold relaunches and quick hops).
  */
 class BlockEngine {
 
     /** blockId -> moment (elapsed realtime ms) its unlock session ends. */
     private val unlockedUntil = HashMap<String, Long>()
+
+    /**
+     * Blocks whose running session has no time limit. While their apps are on screen
+     * their end time is [OPEN_ENDED]; once the apps leave, it becomes "now + grace".
+     */
+    private val openEnded = HashSet<String>()
 
     /**
      * Blocks whose apps were on screen AND usable (unlocked, no hold screen) at the
@@ -68,8 +77,13 @@ class BlockEngine {
         val locked = ArrayList<Block>()
 
         for (block in blocks) {
-            if (!block.enabled) continue
-            if (block.packages.none { it in visiblePackages }) continue
+            val visible = block.enabled && block.packages.any { it in visiblePackages }
+            if (block.id in openEnded) {
+                val current = unlockedUntil.getValue(block.id)
+                unlockedUntil[block.id] =
+                    if (visible) OPEN_ENDED else minOf(current, nowMs + LEAVE_GRACE_MS)
+            }
+            if (!visible) continue
 
             val until = unlockedUntil[block.id]
             when {
@@ -81,6 +95,7 @@ class BlockEngine {
 
         // Once a session is over it's over, whether or not its apps are visible.
         unlockedUntil.entries.removeAll { it.value <= nowMs }
+        openEnded.retainAll(unlockedUntil.keys)
 
         if (expiredWhileInUse.isNotEmpty()) {
             inUseBlockIds = emptySet()
@@ -101,8 +116,13 @@ class BlockEngine {
     /** The hold for [blockIds] was completed: start a session for each (enabled, existing) block. */
     fun onHoldCompleted(blockIds: Set<String>, blocks: List<Block>, nowMs: Long) {
         for (block in blocks) {
-            if (block.id in blockIds && block.enabled) {
+            if (block.id !in blockIds || !block.enabled) continue
+            if (hasNoTimeLimit(block)) {
+                unlockedUntil[block.id] = OPEN_ENDED
+                openEnded += block.id
+            } else {
                 unlockedUntil[block.id] = nowMs + sessionMillisFor(block)
+                openEnded -= block.id
             }
         }
     }
@@ -110,10 +130,20 @@ class BlockEngine {
     /**
      * When the next session ends (elapsed realtime ms), or null if none is running.
      * The service re-evaluates at that moment so it can send the user home on time.
+     * Sessions with no time limit only count once their apps have left the screen.
      */
-    fun nextExpiryMs(): Long? = unlockedUntil.values.minOrNull()
+    fun nextExpiryMs(): Long? = unlockedUntil.values.filter { it != OPEN_ENDED }.minOrNull()
 
     companion object {
+        /** End time of a no-time-limit session while its apps are on screen. */
+        private const val OPEN_ENDED = Long.MAX_VALUE
+
+        /** How long a no-time-limit session survives with its apps off screen. */
+        const val LEAVE_GRACE_MS = 3_000L
+
+        /** Session length 0 = no time limit (negative values are treated as bad input). */
+        fun hasNoTimeLimit(block: Block): Boolean = block.sessionMinutes == 0
+
         // At least 1 second / 1 minute, so a bad value can't make a block meaningless.
         fun holdMillisFor(block: Block): Long = block.holdSeconds.coerceAtLeast(1) * 1_000L
         fun sessionMillisFor(block: Block): Long = block.sessionMinutes.coerceAtLeast(1) * 60_000L
