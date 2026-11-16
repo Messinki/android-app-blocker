@@ -3,6 +3,7 @@ package com.appblocker.blocker
 import android.annotation.SuppressLint
 import android.content.Context
 import android.graphics.Color
+import android.graphics.Insets
 import android.graphics.PixelFormat
 import android.graphics.drawable.GradientDrawable
 import android.os.Build
@@ -121,9 +122,21 @@ class HoldOverlay(
     // ---------------------------------------------------------------- window
 
     private fun buildLayoutParams(): WindowManager.LayoutParams {
+        // A 3-button navigation bar (or the taskbar on the unfolded screen) sits BELOW
+        // this window type, so covering it would leave no way to press Home/Back.
+        // We therefore size the window by hand to stop short of the bar. (Asking the
+        // system to do it via fitInsetsTypes does not work: on Android 15 / One UI the
+        // window still came out full-screen and covered the buttons.)
+        val metrics = windowManager.currentWindowMetrics
+        val bounds = metrics.bounds
+        val bar = if (hasTappableNavigationBar()) {
+            metrics.windowInsets.getInsetsIgnoringVisibility(WindowInsets.Type.navigationBars())
+        } else {
+            Insets.NONE // gesture navigation: safe to cover everything
+        }
         val params = WindowManager.LayoutParams(
-            WindowManager.LayoutParams.MATCH_PARENT,
-            WindowManager.LayoutParams.MATCH_PARENT,
+            bounds.width() - bar.left - bar.right,
+            bounds.height() - bar.bottom,
             // Allowed for accessibility services without SYSTEM_ALERT_WINDOW, drawn above
             // apps, status bar and navigation bar, and not subject to background-launch limits.
             WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
@@ -136,21 +149,17 @@ class HoldOverlay(
                 WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON,
             // Note: NOT FLAG_NOT_FOCUSABLE. The window must take input focus so it
             // receives Back. NOT FLAG_SECURE (screenshots are fine).
-            // NOT FLAG_LAYOUT_NO_LIMITS: it would override the nav-bar gap below.
             PixelFormat.OPAQUE,
         )
         params.gravity = Gravity.TOP or Gravity.START
         // Cover the camera cutout area too.
         params.layoutInDisplayCutoutMode =
             WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
-        // Cover status bar and gesture-navigation area. But a 3-button navigation bar (or
-        // the taskbar on the unfolded screen) is BELOW this window type in z-order, so
-        // covering it would leave no way to press Home/Back. In that case leave a gap.
-        params.fitInsetsTypes =
-            if (hasTappableNavigationBar()) WindowInsets.Type.navigationBars() else 0
-        // Keep the gap even while an immersive app has the nav bar hidden, so it can
-        // always be revealed and tapped.
-        params.isFitInsetsIgnoringVisibility = true
+        // In landscape the bar can be on the left edge; start to the right of it.
+        params.x = bar.left
+        params.y = 0
+        // We did the inset maths ourselves above; don't let the system add its own.
+        params.fitInsetsTypes = 0
         params.title = "AppBlocker hold screen"
         return params
     }
@@ -200,7 +209,7 @@ class HoldOverlay(
         // Swallow every touch that isn't on the button, so the app underneath can't be used.
         rootView.setOnTouchListener { _, _ -> true }
 
-        // Everything sits in one centred column.
+        // Everything sits in one column, placed low and to the right (see below).
         val column = LinearLayout(context).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER_HORIZONTAL
@@ -238,11 +247,16 @@ class HoldOverlay(
 
         rootView.addView(
             column,
+            // Bottom-right, within reach of a right thumb. Change the two margins
+            // (or the gravity) to move the button.
             FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
-                Gravity.CENTER,
-            ),
+                Gravity.BOTTOM or Gravity.END,
+            ).apply {
+                marginEnd = dp(BUTTON_MARGIN_END_DP)
+                bottomMargin = dp(BUTTON_MARGIN_BOTTOM_DP)
+            },
         )
 
         button = holdButton
@@ -335,6 +349,10 @@ class HoldOverlay(
         // Big enough to hold comfortably, small enough for the narrow cover screen.
         const val BUTTON_SIZE_DP = 180f
         const val TEXT_SIZE_SP = 20f
+
+        // Gap between the button and the right / bottom edges of the hold screen.
+        const val BUTTON_MARGIN_END_DP = 40f
+        const val BUTTON_MARGIN_BOTTOM_DP = 120f
 
         // Dim greys on black. Pressed is only slightly lighter: the one permitted feedback.
         val BUTTON_COLOR = Color.rgb(38, 38, 38)
