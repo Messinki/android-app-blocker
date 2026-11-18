@@ -15,14 +15,16 @@ import kotlinx.coroutines.withContext
 
 /**
  * Holds the half-edited block so it survives rotation and folding/unfolding.
- * Nothing is written to the repository until [save] is called.
+ * Every valid change is written to the repository straight away (see [save]); there is no Save button.
  */
 class EditorViewModel(savedStateHandle: SavedStateHandle) : ViewModel() {
     // Navigation puts the "blockId" route argument into the saved state handle.
-    private val existing: Block? = savedStateHandle.get<String>("blockId")
+    private var existing: Block? = savedStateHandle.get<String>("blockId")
         ?.let { id -> BlockRepository.blocks.value.firstOrNull { it.id == id } }
 
-    val isNew: Boolean = existing == null
+    /** True until the first change is saved, which is when a new block comes into existence. */
+    var isNew by mutableStateOf(existing == null)
+        private set
 
     var name by mutableStateOf(existing?.name ?: "")
     // Number fields are kept as text so the user can clear them while typing.
@@ -59,14 +61,15 @@ class EditorViewModel(savedStateHandle: SavedStateHandle) : ViewModel() {
         if (!canSave) return
         // Starting from the existing block keeps its id and enabled flag.
         val base = existing ?: Block()
-        BlockRepository.upsert(
-            base.copy(
-                name = name.trim(),
-                packages = packages,
-                holdSeconds = holdTotalSeconds,
-                sessionMinutes = sessionMinutes.toInt(),
-            ),
+        val updated = base.copy(
+            name = name.trim(),
+            packages = packages,
+            holdSeconds = holdTotalSeconds,
+            sessionMinutes = sessionMinutes.toInt(),
         )
+        BlockRepository.upsert(updated)
+        existing = updated
+        isNew = false
     }
 
     fun delete() {

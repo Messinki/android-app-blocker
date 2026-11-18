@@ -41,6 +41,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
@@ -49,6 +50,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.flow.drop
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -60,13 +62,20 @@ fun BlockEditorScreen(onClose: () -> Unit, vm: EditorViewModel = viewModel()) {
     // Load the app list once up front so selected apps can show their icon and label.
     LaunchedEffect(Unit) { vm.loadApps(context.applicationContext.packageManager) }
 
+    // Save automatically whenever a field changes (the first emission is just the loaded state).
+    LaunchedEffect(vm) {
+        snapshotFlow {
+            listOf(vm.name, vm.holdMinutes, vm.holdSecondsPart, vm.sessionMinutes, vm.packages)
+        }.drop(1).collect { vm.save() }
+    }
+
     Scaffold(
         topBar = {
             TopAppBar(
                 title = { Text(if (vm.isNew) "New block" else "Edit block") },
                 navigationIcon = {
                     IconButton(onClick = onClose) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back (discard)")
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
                     }
                 },
                 actions = {
@@ -75,13 +84,6 @@ fun BlockEditorScreen(onClose: () -> Unit, vm: EditorViewModel = viewModel()) {
                             Icon(Icons.Default.Delete, contentDescription = "Delete block")
                         }
                     }
-                    TextButton(
-                        enabled = vm.canSave,
-                        onClick = {
-                            vm.save()
-                            onClose()
-                        },
-                    ) { Text("Save") }
                 },
             )
         },
